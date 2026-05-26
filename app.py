@@ -3,12 +3,12 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import re
-import requests  # NUEVA LIBRERÍA PARA CONECTARNOS A TU API
+import requests
 
 # 1. CONFIGURACIÓN DE LA PÁGINA EN MODO ANCHO
 st.set_page_config(page_title="Dashboard Generación Complejo Técnico Mejillones", layout="wide")
 
-# FORZAR TEMA CLARO ABSOLUTO
+# FORZAR TEMA CLARO ABSOLUTO + ESTILOS DE IMPRESIÓN PROFESIONAL (PDF)
 st.markdown("""
     <style>
         .stApp { background-color: #FFFFFF !important; color: #1F2937 !important; }
@@ -22,6 +22,13 @@ st.markdown("""
         .metric-value { font-size: 1.8rem !important; color: #111827 !important; font-weight: 700; line-height: 1.2; }
         .metric-subtext { font-size: 0.85rem !important; color: #2563EB !important; font-weight: 600; margin-top: 0.25rem; }
         .metric-subtext-red { font-size: 0.85rem !important; color: #DC2626 !important; font-weight: 600; margin-top: 0.25rem; }
+        
+        /* Reglas CSS para exportación limpia a PDF mediante impresión */
+        @media print {
+            header, footer, nav, .stSidebar, [data-testid="stSidebar"], .no-print { display: none !important; }
+            .stApp { background-color: white !important; }
+            .block-container { padding: 0 !important; margin: 0 !important; }
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -31,8 +38,8 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 # --- ENLACES DE GOOGLE SHEETS ---
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 
-# PEGA AQUÍ LA URL LARGA QUE COPIASTE EN EL PASO 2 (DE GOOGLE APPS SCRIPT)
-URL_API_BITACORA = "https://script.google.com/macros/s/AKfycbxkoAnX_XMF7zW0C1AR71tkvjnqNJDCmh9T_hJ1w-7cHwQ1jvdiWI4aCXPQ1DWqmuGN/exec"
+# !!! COLOCA AQUÍ TU URL LARGA DE APPS SCRIPT !!!
+URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2" # Reemplazar si es diferente
 
 def limpiar_formato_latam(val):
     if pd.isna(val): return None
@@ -75,12 +82,37 @@ def cargar_datos_produccion():
             df.loc[df[col_real] > 300.0, col_real] = df[col_prog]
     return df
 
-# FUNCIONES CLAVE PARA LEER Y ESCRIBIR LA BITÁCORA GLOBAL DESDE GOOGLE SHEETS
+# PARSEO CONTROLADO DE FECHAS DE GOOGLE APPS SCRIPT
+def normalizar_fecha_api(fecha_raw):
+    if not fecha_raw: return ""
+    str_f = str(fecha_raw).strip()
+    if "T" in str_f:
+        try:
+            dt = datetime.strptime(str_f.split("T")[0], "%Y-%m-%d")
+            return dt.strftime("%d/%m/%Y")
+        except: pass
+    return str_f
+
+def normalizar_hora_api(hora_raw):
+    if not hora_raw: return "00:00"
+    str_h = str(hora_raw).strip()
+    if "T" in str_h:
+        try:
+            componente_hora = str_h.split("T")[1].replace("Z", "")
+            return componente_hora Oscar[:5]
+        except: pass
+    return str_h[:5]
+
 def obtener_bitacora_global():
     try:
         respuesta = requests.get(URL_API_BITACORA, timeout=10)
         if respuesta.status_code == 200:
-            return pd.DataFrame(respuesta.json())
+            raw_data = respuesta.json()
+            if raw_data:
+                df = pd.DataFrame(raw_data)
+                df['fecha'] = df['fecha'].apply(normalizar_fecha_api)
+                df['hora'] = df['hora'].apply(normalizar_hora_api)
+                return df
     except:
         pass
     return pd.DataFrame(columns=["id", "fecha", "hora", "unidad", "autor", "comentario"])
@@ -113,6 +145,7 @@ try:
         inicio, fin = rango_fechas
         df_filtrado = df_metrics[(df_metrics['Fecha'].dt.date >= inicio) & (df_metrics['Fecha'].dt.date <= fin)].copy()
     else:
+        inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
     df_calc = df_filtrado.copy()
@@ -120,6 +153,12 @@ try:
     df_calc[col_prog] = df_calc[col_prog].fillna(0.0)
     df_filtrado['Desviacion_MW'] = df_calc[col_real] - df_calc[col_prog]
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
+
+    # --- BOTÓN EXPORTACIÓN PDF EN BARRA LATERAL ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("Reportabilidad")
+    if st.sidebar.button("🖨️ Generar Reporte / Imprimir PDF"):
+        st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
 
     st.subheader(f"Monitoreo de Potencia y Despacho - {seleccion_unidad}")
     mostrar_achurado = st.checkbox("Mostrar área de desviación (Bruta vs Programada)", value=False)
@@ -159,13 +198,22 @@ try:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- NUEVA SECCIÓN DE BITÁCORA GLOBAL CONEXIÓN DIRECTA ---
+    # --- SECCIÓN BITÁCORA CON FILTRO VINCULADO ---
     st.markdown("---")
     st.markdown("### Bitácora de Novedades Operacionales (Historial Unificado)")
     
-    # Cargar bitácora viva desde Google Sheets mediante Apps Script
     df_comentarios = obtener_bitacora_global()
-    df_comentarios_filtrados = df_comentarios[df_comentarios['unidad'] == seleccion_unidad] if not df_comentarios.empty else pd.DataFrame()
+    
+    # Aplicar Filtros: 1. Unidad Seleccionada, 2. Rango de fecha seleccionado
+    if not df_comentarios.empty:
+        df_comentarios['fecha_parsed'] = pd.to_datetime(df_comentarios['fecha'], format='%d/%m/%Y', errors='coerce')
+        df_comentarios_filtrados = df_comentarios[
+            (df_comentarios['unidad'] == seleccion_unidad) & 
+            (df_comentarios['fecha_parsed'].dt.date >= inicio) & 
+            (df_comentarios['fecha_parsed'].dt.date <= fin)
+        ].copy()
+    else:
+        df_comentarios_filtrados = pd.DataFrame()
 
     col_form, col_tabla = st.columns([1, 1.8])
 
@@ -181,7 +229,7 @@ try:
             
             if boton_guardar:
                 texto_limpio = novedad.strip()
-                if texto_limpio != "" and URL_API_BITACORA != "TU_URL_DE_APPS_SCRIPT_AQUI":
+                if texto_limpio != "":
                     nuevo_id = str(int(datetime.now().timestamp() * 1000))
                     payload = {
                         "action": "add", "id": nuevo_id,
@@ -193,33 +241,51 @@ try:
                         if res.status_code == 200:
                             st.success("Registro sincronizado en Google Sheets.")
                             st.rerun()
-                        else: st.error("Error en comunicación con Sheets.")
-                    except: st.error("Error de conexión al guardar.")
-                else: st.warning("Escribe una descripción o configura la URL de la API.")
+                    except: 
+                        st.error("Error de conexión al guardar.")
+                else: 
+                    st.warning("Escribe una descripción antes de enviar.")
 
     with col_tabla:
-        st.subheader(f"Historial de Eventos - {seleccion_unidad}")
+        st.subheader(f"Historial en Ventana Seleccionada")
         if not df_comentarios_filtrados.empty:
             df_mostrar = df_comentarios_filtrados.copy()
-            df_mostrar['fecha_dt'] = pd.to_datetime(df_mostrar['fecha'], format='%d/%m/%Y', errors='coerce')
-            df_mostrar = df_mostrar.sort_values(by=["fecha_dt", "hora"], ascending=[False, False])
+            df_mostrar = df_mostrar.sort_values(by=["fecha_parsed", "hora"], ascending=[False, False])
             
             st.dataframe(df_mostrar[['fecha', 'hora', 'autor', 'comentario']], column_config={"fecha": "Fecha", "hora": "Hora Exacta", "autor": "Jefe de Turno", "comentario": "Novedad / Comentario"}, width="stretch", hide_index=True)
             
             st.markdown("#### Administración de Registros")
             opciones_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
-            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
             
-            if st.button("❌ Eliminar Evento Seleccionado"):
-                payload_del = {"action": "delete", "id": id_seleccionado}
-                try:
-                    res = requests.post(URL_API_BITACORA, json=payload_del, timeout=10)
-                    if res.status_code == 200:
-                        st.success("Registro eliminado de Google Sheets.")
-                        st.rerun()
-                except: st.error("Error de conexión al eliminar.")
+            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
+            registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
+            
+            # Formulario de Modificación / Eliminación Dinámica
+            mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
+            mod_comentario = st.text_area("Modificar Descripción:", value=registro_actual['comentario'])
+            
+            c_btn1, c_btn2 = st.columns(2)
+            with c_btn1:
+                if st.button("💾 Actualizar Cambios"):
+                    payload_upd = {"action": "update", "id": id_seleccionado, "autor": mod_autor, "comentario": mod_comentario}
+                    try:
+                        res = requests.post(URL_API_BITACORA, json=payload_upd, timeout=10)
+                        if res.status_code == 200:
+                            st.success("Registro actualizado con éxito.")
+                            st.rerun()
+                    except: st.error("Error de conexión al actualizar.")
+                    
+            with c_btn2:
+                if st.button("❌ Eliminar Evento"):
+                    payload_del = {"action": "delete", "id": id_seleccionado}
+                    try:
+                        res = requests.post(URL_API_BITACORA, json=payload_del, timeout=10)
+                        if res.status_code == 200:
+                            st.success("Registro eliminado.")
+                            st.rerun()
+                    except: st.error("Error de conexión al eliminar.")
         else:
-            st.info("No hay eventos compartidos registrados para esta unidad.")
+            st.info("No hay eventos compartidos para esta unidad dentro del rango de fechas seleccionado.")
 
 except Exception as e:
     st.error(f"Error en el procesamiento del sistema: {e}")
