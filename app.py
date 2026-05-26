@@ -37,8 +37,6 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 
 # --- ENLACES DE GOOGLE SHEETS ---
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
-
-# URL de Google Apps Script para la Bitácora Global
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
 def limpiar_formato_latam(val):
@@ -46,17 +44,14 @@ def limpiar_formato_latam(val):
     s = str(val).strip().replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
     if s in ['', 'nan', 'None', 'NaN', 'null']: return None
     try:
-        # Reemplazar comas decimales por puntos si existen
         if ',' in s:
             partes = s.split(',')
             s_convertir = partes[0].replace('.', '') + '.' + partes[1]
         else:
             s_convertir = s
         
-        # Dejar solo dígitos, puntos o signos menos
         s_limpio = re.sub(r'[^\d\.\-]', '', s_convertir)
-        valor = float(s_limpio)
-        return valor
+        return float(s_limpio)
     except: 
         return None
 
@@ -71,12 +66,12 @@ def cargar_datos_produccion():
         
     df.columns = df.columns.str.strip()
     columnas_fecha = [col for col in df.columns if 'fech' in col.lower()]
-    if columnas_fecha: df = df.rename(columns={columnas_fecha[0]: 'Fecha'})
+    if columnas_fecha: 
+        df = df.rename(columns={columnas_fecha[0]: 'Fecha'})
     
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # Convertir rigurosamente las columnas numéricas
     for col in df.columns:
         if col != 'Fecha':
             df[col] = df[col].apply(limpiar_formato_latam)
@@ -84,7 +79,6 @@ def cargar_datos_produccion():
             
     return df
 
-# PARSEO CONTROLADO DE FECHAS DE GOOGLE APPS SCRIPT
 def normalizar_fecha_api(fecha_raw):
     if not fecha_raw: return ""
     str_f = str(fecha_raw).strip()
@@ -124,14 +118,30 @@ try:
     columnas = list(df_metrics.columns)
     unidades_detectadas = {}
     
-    def buscar_par_columnas(tag_unidad):
-        col_r = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'r' in c.lower()]
-        col_p = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'p' in c.lower()]
-        return (col_r[0], col_p[0]) if (col_r and col_p) else None
+    # Mapeo manual ultra-preciso basado en las columnas reales del documento
+    mapeo_estricto = {
+        "Angamos Unidad 1": ("ANG01-R", "ANG01-P"),
+        "Angamos Unidad 2": ("ANG02-R", "ANG02-P"),
+        "Cochrane Unidad 1": ("CCH01-R", "CCH01-P"),
+        "Cochrane Unidad 2": ("CCH02-R", "CCH02-P")
+    }
 
-    for nombre_legible, tag in [("Angamos Unidad 1", "ANG01"), ("Angamos Unidad 2", "ANG02"), ("Cochrane Unidad 1", "CCH01"), ("Cochrane Unidad 2", "CCH02")]:
-        par = buscar_par_columnas(tag)
-        if par: unidades_detectadas[nombre_legible] = par
+    for nombre_legible, (r_tag, p_tag) in mapeo_estricto.items():
+        col_r = [c for c in columnas if c.upper() == r_tag]
+        col_p = [c for c in columnas if c.upper() == p_tag]
+        if col_r and col_p:
+            unidades_detectadas[nombre_legible] = (col_r[0], col_p[0])
+
+    # Si por alguna razón falla el emparejamiento estricto, usamos el fallback dinámico anterior
+    if not unidades_detectadas:
+        def buscar_par_columnas(tag_unidad):
+            col_r = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'r' in c.lower()]
+            col_p = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'p' in c.lower()]
+            return (col_r[0], col_p[0]) if (col_r and col_p) else None
+
+        for nombre_legible, tag in [("Angamos Unidad 1", "ANG01"), ("Angamos Unidad 2", "ANG02"), ("Cochrane Unidad 1", "CCH01"), ("Cochrane Unidad 2", "CCH02")]:
+            par = buscar_par_columnas(tag)
+            if par: unidades_detectadas[nombre_legible] = par
 
     st.sidebar.header("Filtros de Operación")
     seleccion_unidad = st.sidebar.selectbox("Selecciona Unidad:", list(unidades_detectadas.keys()))
@@ -150,11 +160,11 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Rellenar ceros para evitar saltos y asegurar restas matemáticas correctas
-    df_filtrado[col_real] = df_filtrado[col_real].fillna(0.0)
-    df_filtrado[col_prog] = df_filtrado[col_prog].fillna(0.0)
+    # Operación matemática directa sobre copias limpias sin alterar el DataFrame original
+    serie_real = pd.to_numeric(df_filtrado[col_real]).fillna(0.0)
+    serie_prog = pd.to_numeric(df_filtrado[col_prog]).fillna(0.0)
     
-    df_filtrado['Desviacion_MW'] = df_filtrado[col_real] - df_filtrado[col_prog]
+    df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
 
     # --- BOTÓN EXPORTACIÓN PDF EN BARRA LATERAL ---
@@ -167,12 +177,13 @@ try:
     mostrar_achurado = st.checkbox("Mostrar área de desviación (Bruta vs Programada)", value=False)
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_prog], name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5), connectgaps=True))
+    # Graficar usando directamente las series procesadas para asegurar consistencia
+    fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_prog, name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5), connectgaps=True))
     
     if mostrar_achurado:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_real], name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)', connectgaps=True))
+        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)', connectgaps=True))
     else:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_real], name='Potencia Real', line=dict(color='#3B66FF', width=2.5), connectgaps=True))
+        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), connectgaps=True))
         
     fig.update_layout(title="Curva de Desempeño Temporal (Ventana de Control Activa)", xaxis_title="Tiempo / Horas", yaxis_title="Potencia (MW)", template="plotly_white", hovermode="x unified", margin=dict(t=40, b=40))
     st.plotly_chart(fig, width="stretch")
@@ -209,7 +220,6 @@ try:
     
     df_comentarios = obtener_bitacora_global()
     
-    # Aplicar Filtros Vinculados a la Vista Temporal de Operación
     if not df_comentarios.empty:
         df_comentarios['fecha_parsed'] = pd.to_datetime(df_comentarios['fecha'], format='%d/%m/%Y', errors='coerce')
         df_comentarios_filtrados = df_comentarios[
@@ -265,7 +275,6 @@ try:
             id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
             registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
             
-            # Formulario dinámico para Edición y Modificación de eventos existentes
             mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
             mod_comentario = st.text_area("Modificar Descripción:", value=registro_actual['comentario'])
             
