@@ -48,7 +48,7 @@ def limpiar_formato_latam(val):
     try:
         if ',' in s:
             partes = s.split(',')
-            s_convertir = partes[0].replace('.', '') + '.' + pandas[1]
+            s_convertir = partes[0].replace('.', '') + '.' + partes[1] # <--- CORREGIDO: partes en vez de pandas
         else:
             s_convertir = s if s.count('.') == 1 else s.replace('.', '')
         valor = float(s_convertir)
