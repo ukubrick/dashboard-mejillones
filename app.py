@@ -4,28 +4,25 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 
-# 1. CONFIGURACIÓN DE LA PÁGINA EN MODO ANCHO
+# 1. CONFIGURACIÓN DE LA PÁGINA
 st.set_page_config(page_title="Dashboard Generación Complejo Técnico Mejillones", layout="wide")
 
-# FORZAR TEMA CLARO ABSOLUTO + ESTILOS DE IMPRESIÓN PROFESIONAL (PDF)
+# ESTILOS DE INTERFAZ (TEMA CLARO ABSOLUTO)
 st.markdown("""
     <style>
         .stApp { background-color: #FFFFFF !important; color: #1F2937 !important; }
         .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-        h1, h2, h3, h4, p, span, label { color: #111827 !important; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-        .stButton>button { background-color: #3B66FF !important; color: white !important; border-radius: 4px; border: none; }
-        .stButton>button:hover { background-color: #2651E6 !important; color: white !important; }
+        h1, h2, h3, h4, p, span, label { color: #111827 !important; font-family: 'Segoe UI', Roboto, sans-serif; }
+        .stButton>button { background-color: #3B66FF !important; color: white !important; border-radius: 4px; }
         .stDataFrame, div[data-testid="stTable"] { background-color: #F9FAFB !important; border: 1px solid #E5E7EB; }
-        .metric-card { background-color: #F9FAFB; border: 1px solid #E5E7EB; padding: 1rem; border-radius: 6px; text-align: left; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
-        .metric-label { font-size: 0.85rem !important; color: #4B5563 !important; font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem; }
-        .metric-value { font-size: 1.8rem !important; color: #111827 !important; font-weight: 700; line-height: 1.2; }
-        .metric-subtext { font-size: 0.85rem !important; color: #2563EB !important; font-weight: 600; margin-top: 0.25rem; }
-        .metric-subtext-red { font-size: 0.85rem !important; color: #DC2626 !important; font-weight: 600; margin-top: 0.25rem; }
-        
+        .metric-card { background-color: #F9FAFB; border: 1px solid #E5E7EB; padding: 1rem; border-radius: 6px; }
+        .metric-label { font-size: 0.85rem !important; color: #4B5563 !important; font-weight: 600; text-transform: uppercase; }
+        .metric-value { font-size: 1.8rem !important; color: #111827 !important; font-weight: 700; }
+        .metric-subtext { font-size: 0.85rem !important; color: #2563EB !important; font-weight: 600; }
+        .metric-subtext-red { font-size: 0.85rem !important; color: #DC2626 !important; font-weight: 600; }
         @media print {
             header, footer, nav, .stSidebar, [data-testid="stSidebar"], .no-print { display: none !important; }
             .stApp { background-color: white !important; }
-            .block-container { padding: 0 !important; margin: 0 !important; }
         }
     </style>
 """, unsafe_allow_html=True)
@@ -40,6 +37,7 @@ URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_Tew
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
     try:
+        # Lectura directa y limpia, delegando la detección de tipos a Pandas de forma nativa
         df = pd.read_csv(URL_GOOGLE_SHEETS, on_bad_lines="skip", engine="python")
         st.sidebar.success("Conexión activa: Datos desde Google Sheets")
     except Exception as e:
@@ -54,10 +52,9 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
+    # Conversión numérica básica sin funciones 'fillna' con argumentos obsoletos
     for col in df.columns:
         if col != 'Fecha':
-            if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).str.replace(' ', '').str.replace(',', '.')
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
     return df
@@ -131,9 +128,9 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # CORRECCIÓN AQUÍ: Usamos .ffill().fillna(0.0) para ser compatible con Pandas nuevo
-    serie_real = df_filtrado[col_real].ffill().fillna(0.0)
-    serie_prog = df_filtrado[col_prog].ffill().fillna(0.0)
+    # Extracción directa limpia de series. Reemplazamos valores vacíos remanentes con 0 de forma directa y universal.
+    serie_real = df_filtrado[col_real].fillna(0.0)
+    serie_prog = df_filtrado[col_prog].fillna(0.0)
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
@@ -148,12 +145,12 @@ try:
     mostrar_achurado = st.checkbox("Mostrar área de desviación (Bruta vs Programada)", value=False)
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_prog, name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5), connectgaps=True))
+    fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_prog, name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5)))
     
     if mostrar_achurado:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)', connectgaps=True))
+        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)'))
     else:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), connectgaps=True))
+        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5)))
         
     fig.update_layout(title="Curva de Desempeño Temporal (Ventana de Control Activa)", xaxis_title="Tiempo / Horas", yaxis_title="Potencia (MW)", template="plotly_white", hovermode="x unified", margin=dict(t=40, b=40))
     st.plotly_chart(fig, width="stretch")
@@ -166,8 +163,8 @@ try:
     st.plotly_chart(fig_bar, width="stretch")
 
     st.markdown("### Indicadores Estadísticos de Desviación")
-    desvio_medio = df_filtrado['Desviacion_Abs_MW'].mean()
-    energia_desviada_total = df_filtrado['Desviacion_Abs_MW'].sum() 
+    desvio_medio = df_filtrado['Desviacion_Abs_MW'].mean() if not df_filtrado.empty else 0.0
+    energia_desviada_total = df_filtrado['Desviacion_Abs_MW'].sum() if not df_filtrado.empty else 0.0
 
     if not df_filtrado.empty and not df_filtrado['Desviacion_MW'].isna().all():
         idx_max_abs = df_filtrado['Desviacion_Abs_MW'].idxmax()
