@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import re
 import requests
 
 # 1. CONFIGURACIÓN DE LA PÁGINA EN MODO ANCHO
@@ -22,7 +23,6 @@ st.markdown("""
         .metric-subtext { font-size: 0.85rem !important; color: #2563EB !important; font-weight: 600; margin-top: 0.25rem; }
         .metric-subtext-red { font-size: 0.85rem !important; color: #DC2626 !important; font-weight: 600; margin-top: 0.25rem; }
         
-        /* Reglas CSS para exportación limpia a PDF mediante impresión */
         @media print {
             header, footer, nav, .stSidebar, [data-testid="stSidebar"], .no-print { display: none !important; }
             .stApp { background-color: white !important; }
@@ -39,22 +39,26 @@ URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
 def conversion_numerica_segura(val):
-    if pd.isna(val): return None
+    if pd.isna(val): return 0.0
     s = str(val).strip().replace(' ', '')
-    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return None
+    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return 0.0
     try:
-        # Si contiene coma, es formato LATAM (ej: 140,50)
-        if ',' in s:
+        # Detectar formato LATAM con coma decimal (ej: 240,5)
+        if ',' in s and s.count(',') == 1:
             s = s.replace('.', '').replace(',', '.')
-        return float(s)
+        
+        # Eliminar cualquier residuo que no sea número, punto o menos
+        s_limpio = re.sub(r'[^\d\.\-]', '', s)
+        valor = float(s_limpio)
+        
+        # CORRECCIÓN DE ESCALA CRÍTICA:
+        # Si el número se disparó por culpa de puntos fantasmas (ej: 277900.0 en vez de 277.9)
+        if valor > 1000.0:
+            valor = valor / 1000.0
+            
+        return valor
     except:
-        # Fallback por si queda algún caracter extraño adherido
-        try:
-            import re
-            s_limpio = re.sub(r'[^\d\.\-]', '', s)
-            return float(s_limpio)
-        except:
-            return None
+        return 0.0
 
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
@@ -73,10 +77,10 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # Aplicar la conversión segura a todas las columnas numéricas
     for col in df.columns:
         if col != 'Fecha':
             df[col] = df[col].apply(conversion_numerica_segura)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             
     return df
 
@@ -119,7 +123,6 @@ try:
     columnas = list(df_metrics.columns)
     unidades_detectadas = {}
     
-    # Mapeo directo y absoluto
     mapeo_estricto = {
         "Angamos Unidad 1": ("ANG01-R", "ANG01-P"),
         "Angamos Unidad 2": ("ANG02-R", "ANG02-P"),
@@ -150,9 +153,9 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Procesar las series finales cuidando no sobreescribir con ceros registros válidos
-    serie_real = df_filtrado[col_real].fillna(0.0)
-    serie_prog = df_filtrado[col_prog].fillna(0.0)
+    # Extraer las series limpias directamente
+    serie_real = df_filtrado[col_real]
+    serie_prog = df_filtrado[col_prog]
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
@@ -259,9 +262,9 @@ try:
             st.dataframe(df_mostrar[['fecha', 'hora', 'autor', 'comentario']], column_config={"fecha": "Fecha", "hora": "Hora Exacta", "autor": "Jefe de Turno", "comentario": "Novedad / Comentario"}, width="stretch", hide_index=True)
             
             st.markdown("#### Administración de Registros")
-            opciones_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
+            options_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
             
-            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
+            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(options_admin.keys()), format_func=lambda x: options_admin[x])
             registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
             
             mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
