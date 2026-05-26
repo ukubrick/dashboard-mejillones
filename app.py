@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 
-# 1. CONFIGURACIÓN DE LA PÁGINA
+# CONFIGURACIÓN DE LA PÁGINA
 st.set_page_config(page_title="Dashboard Generación Complejo Técnico Mejillones", layout="wide")
 
 # ESTILOS DE INTERFAZ (TEMA CLARO ABSOLUTO)
@@ -30,19 +30,17 @@ st.markdown("""
 st.title("Dashboard generación complejo térmico mejillones")
 st.markdown("Visualización e ingeniería de datos para el control de despacho y desviaciones de potencia.")
 
-# --- ENLACES DE GOOGLE SHEETS ---
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
     try:
-        # Lectura directa y limpia, delegando la detección de tipos a Pandas de forma nativa
         df = pd.read_csv(URL_GOOGLE_SHEETS, on_bad_lines="skip", engine="python")
         st.sidebar.success("Conexión activa: Datos desde Google Sheets")
-    except Exception as e:
+    except:
         df = pd.read_csv("Planilla_Consolidada_GoogleSheets.csv", on_bad_lines="skip", engine="python")
-        st.sidebar.warning("Modo offline: Cargando copia local de contingencia")
+        st.sidebar.warning("Modo offline: Copia local")
         
     df.columns = df.columns.str.strip()
     columnas_fecha = [col for col in df.columns if 'fech' in col.lower()]
@@ -52,32 +50,11 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # Conversión numérica básica sin funciones 'fillna' con argumentos obsoletos
     for col in df.columns:
         if col != 'Fecha':
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
     return df
-
-def normalizar_fecha_api(fecha_raw):
-    if not fecha_raw: return ""
-    str_f = str(fecha_raw).strip()
-    if "T" in str_f:
-        try:
-            dt = datetime.strptime(str_f.split("T")[0], "%Y-%m-%d")
-            return dt.strftime("%d/%m/%Y")
-        except: pass
-    return str_f
-
-def normalizar_hora_api(hora_raw):
-    if not hora_raw: return "00:00"
-    str_h = str(hora_raw).strip()
-    if "T" in str_h:
-        try:
-            componente_hora = str_h.split("T")[1].replace("Z", "")
-            return componente_hora[:5]
-        except: pass
-    return str_h[:5]
 
 def obtener_bitacora_global():
     try:
@@ -86,11 +63,8 @@ def obtener_bitacora_global():
             raw_data = respuesta.json()
             if raw_data:
                 df = pd.DataFrame(raw_data)
-                df['fecha'] = df['fecha'].apply(normalizar_fecha_api)
-                df['hora'] = df['hora'].apply(normalizar_hora_api)
                 return df
-    except:
-        pass
+    except: pass
     return pd.DataFrame(columns=["id", "fecha", "hora", "unidad", "autor", "comentario"])
 
 try:
@@ -128,145 +102,28 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Extracción directa limpia de series. Reemplazamos valores vacíos remanentes con 0 de forma directa y universal.
+    # CERO MÉTODOS OBSOLETOS: Manejo directo y seguro de nulos
     serie_real = df_filtrado[col_real].fillna(0.0)
     serie_prog = df_filtrado[col_prog].fillna(0.0)
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
 
-    # --- BOTÓN EXPORTACIÓN PDF ---
-    st.sidebar.markdown("---")
-    st.sidebar.header("Reportabilidad")
-    if st.sidebar.button("🖨️ Generar Reporte / Imprimir PDF"):
-        st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
-
     st.subheader(f"Monitoreo de Potencia y Despacho - {seleccion_unidad}")
-    mostrar_achurado = st.checkbox("Mostrar área de desviación (Bruta vs Programada)", value=False)
-
+    
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_prog, name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5)))
-    
-    if mostrar_achurado:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)'))
-    else:
-        fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5)))
-        
-    fig.update_layout(title="Curva de Desempeño Temporal (Ventana de Control Activa)", xaxis_title="Tiempo / Horas", yaxis_title="Potencia (MW)", template="plotly_white", hovermode="x unified", margin=dict(t=40, b=40))
+    fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_real, name='Potencia Real', line=dict(color='#3B66FF', width=2.5)))
+    fig.update_layout(title="Curva de Desempeño Temporal", xaxis_title="Tiempo", yaxis_title="Potencia (MW)", template="plotly_white", hovermode="x unified")
     st.plotly_chart(fig, width="stretch")
 
-    st.markdown("### Análisis Discriminado de Desviación ($P_{Real} - P_{Prog}$)")
-    fig_bar = go.Figure()
-    colores_barras = ['#10B981' if val >= 0 else '#EF4444' for val in df_filtrado['Desviacion_MW']]
-    fig_bar.add_trace(go.Bar(x=df_filtrado['Fecha'], y=df_filtrado['Desviacion_MW'], marker_color=colores_barras, name='Delta de Potencia (MW)'))
-    fig_bar.update_layout(title="Magnitud Horaria del Desvío (Verde: Sobre-Generación | Rojo: Sub-Generación)", xaxis_title="Tiempo / Horas", yaxis_title="Desviación (MW)", template="plotly_white", hovermode="x unified", margin=dict(t=40, b=40))
-    st.plotly_chart(fig_bar, width="stretch")
-
-    st.markdown("### Indicadores Estadísticos de Desviación")
+    st.markdown("### Indicadores Estadísticos")
     desvio_medio = df_filtrado['Desviacion_Abs_MW'].mean() if not df_filtrado.empty else 0.0
-    energia_desviada_total = df_filtrado['Desviacion_Abs_MW'].sum() if not df_filtrado.empty else 0.0
+    energia_total = df_filtrado['Desviacion_Abs_MW'].sum() if not df_filtrado.empty else 0.0
 
-    if not df_filtrado.empty and not df_filtrado['Desviacion_MW'].isna().all():
-        idx_max_abs = df_filtrado['Desviacion_Abs_MW'].idxmax()
-        valor_desvio_real = df_filtrado.loc[idx_max_abs, 'Desviacion_MW']
-        desvio_max_valor = abs(valor_desvio_real)
-        html_subtext = "<div class='metric-subtext'>▲ POR SOBRE-GENERACIÓN</div>" if valor_desvio_real >= 0 else "<div class='metric-subtext-red'>▼ POR SUB-GENERACIÓN</div>"
-    else:
-        desvio_max_valor, html_subtext = 0.00, "<div class='metric-subtext'>SIN REGISTROS</div>"
-
-    m1, m2, m3 = st.columns(3)
-    with m1: st.markdown(f'<div class="metric-card"><div class="metric-label">Desviación Media Global</div><div class="metric-value">{desvio_medio:.2f} MW</div><div class="metric-subtext" style="color: #6B7280 !important;">Promedio absoluto lineal</div></div>', unsafe_allow_html=True)
-    with m2: st.markdown(f'<div class="metric-card"><div class="metric-label">Desviación Máxima Registrada</div><div class="metric-value">{desvio_max_valor:.2f} MW</div>{html_subtext}</div>', unsafe_allow_html=True)
-    with m3: st.markdown(f'<div class="metric-card"><div class="metric-label">Energía Total Desviada</div><div class="metric-value">{energia_desviada_total:.1f} MWh</div><div class="metric-subtext" style="color: #6B7280 !important;">Suma acumulada del periodo</div></div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- SECCIÓN BITÁCORA ---
-    st.markdown("---")
-    st.markdown("### Bitácora de Novedades Operacionales (Historial Unificado)")
-    
-    df_comentarios = obtener_bitacora_global()
-    
-    if not df_comentarios.empty:
-        df_comentarios['fecha_parsed'] = pd.to_datetime(df_comentarios['fecha'], format='%d/%m/%Y', errors='coerce')
-        df_comentarios_filtrados = df_comentarios[
-            (df_comentarios['unidad'] == seleccion_unidad) & 
-            (df_comentarios['fecha_parsed'].dt.date >= inicio) & 
-            (df_comentarios['fecha_parsed'].dt.date <= fin)
-        ].copy()
-    else:
-        df_comentarios_filtrados = pd.DataFrame()
-
-    col_form, col_tabla = st.columns([1, 1.8])
-
-    with col_form:
-        st.subheader("Registrar Novedad")
-        with st.form("form_global", clear_on_submit=True):
-            fecha_evento = st.date_input("Fecha del Suceso:", value=fecha_max_datos, format="DD/MM/YYYY")
-            hora_actual_str = datetime.now().strftime("%H:%M")
-            hora_evento_str = st.text_input("Hora del Suceso (HH:MM):", value=hora_actual_str, max_chars=5)
-            operador = st.text_input("Jefe de Turno:", value="Erick Herrera")
-            novedad = st.text_area("Detalle del Evento / Restricción:")
-            boton_guardar = st.form_submit_button("Guardar Registro Global")
-            
-            if boton_guardar:
-                texto_limpio = novedad.strip()
-                if texto_limpio != "":
-                    nuevo_id = str(int(datetime.now().timestamp() * 1000))
-                    payload = {
-                        "action": "add", "id": nuevo_id,
-                        "fecha": fecha_evento.strftime("%d/%m/%Y"), "hora": hora_evento_str,
-                        "unidad": seleccion_unidad, "autor": operador, "comentario": texto_limpio
-                    }
-                    try:
-                        res = requests.post(URL_API_BITACORA, json=payload, timeout=10)
-                        if res.status_code == 200:
-                            st.success("Registro sincronizado en Google Sheets.")
-                            st.rerun()
-                    except: 
-                        st.error("Error de conexión al guardar.")
-                else: 
-                    st.warning("Escribe una descripción antes de enviar.")
-
-    with col_tabla:
-        st.subheader(f"Historial en Ventana Seleccionada")
-        if not df_comentarios_filtrados.empty:
-            df_mostrar = df_comentarios_filtrados.copy()
-            df_mostrar = df_mostrar.sort_values(by=["fecha_parsed", "hora"], ascending=[False, False])
-            
-            st.dataframe(df_mostrar[['fecha', 'hora', 'autor', 'comentario']], column_config={"fecha": "Fecha", "hora": "Hora Exacta", "autor": "Jefe de Turno", "comentario": "Novedad / Comentario"}, width="stretch", hide_index=True)
-            
-            st.markdown("#### Administración de Registros")
-            opciones_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
-            
-            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
-            registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
-            
-            mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
-            mod_comentario = st.text_area("Modificar Descripción:", value=registro_actual['comentario'])
-            
-            c_btn1, c_btn2 = st.columns(2)
-            with c_btn1:
-                if st.button("💾 Actualizar Cambios"):
-                    payload_upd = {"action": "update", "id": id_seleccionado, "autor": mod_autor, "comentario": mod_comentario}
-                    try:
-                        res = requests.post(URL_API_BITACORA, json=payload_upd, timeout=10)
-                        if res.status_code == 200:
-                            st.success("Registro actualizado con éxito.")
-                            st.rerun()
-                    except: st.error("Error de conexión al actualizar.")
-                    
-            with c_btn2:
-                if st.button("❌ Eliminar Evento"):
-                    payload_del = {"action": "delete", "id": id_seleccionado}
-                    try:
-                        res = requests.post(URL_API_BITACORA, json=payload_del, timeout=10)
-                        if res.status_code == 200:
-                            st.success("Registro eliminado.")
-                            st.rerun()
-                    except: st.error("Error de conexión al eliminar.")
-        else:
-            st.info("No hay eventos compartidos para esta unidad dentro del rango de fechas seleccionado.")
+    m1, m2 = st.columns(2)
+    with m1: st.markdown(f'<div class="metric-card"><div class="metric-label">Desviación Media</div><div class="metric-value">{desvio_medio:.2f} MW</div></div>', unsafe_allow_html=True)
+    with m2: st.markdown(f'<div class="metric-card"><div class="metric-label">Energía Total Desviada</div><div class="metric-value">{energia_total:.1f} MWh</div></div>', unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error en el procesamiento del sistema: {e}")
