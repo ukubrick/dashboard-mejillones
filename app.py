@@ -40,7 +40,6 @@ URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_Tew
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
     try:
-        # Volvemos a la lectura nativa directa que no generaba conflictos de escala
         df = pd.read_csv(URL_GOOGLE_SHEETS, on_bad_lines="skip", engine="python")
         st.sidebar.success("Conexión activa: Datos desde Google Sheets")
     except Exception as e:
@@ -55,7 +54,6 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # Conversión numérica estándar global de Pandas sin alterar strings válidos
     for col in df.columns:
         if col != 'Fecha':
             if df[col].dtype == 'object':
@@ -103,7 +101,6 @@ try:
     columnas = list(df_metrics.columns)
     unidades_detectadas = {}
     
-    # Mapeo directo y estricto idéntico al de las versiones que funcionaban
     mapeo_estricto = {
         "Angamos Unidad 1": ("ANG01-R", "ANG01-P"),
         "Angamos Unidad 2": ("ANG02-R", "ANG02-P"),
@@ -134,9 +131,9 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Rellenar nulos con interpolación o ceros de manera limpia sin romper vectores
-    serie_real = df_filtrado[col_real].fillna(method='ffill').fillna(0.0)
-    serie_prog = df_filtrado[col_prog].fillna(method='ffill').fillna(0.0)
+    # CORRECCIÓN AQUÍ: Usamos .ffill().fillna(0.0) para ser compatible con Pandas nuevo
+    serie_real = df_filtrado[col_real].ffill().fillna(0.0)
+    serie_prog = df_filtrado[col_prog].ffill().fillna(0.0)
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
