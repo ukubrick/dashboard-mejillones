@@ -46,17 +46,19 @@ def limpiar_formato_latam(val):
     s = str(val).strip().replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
     if s in ['', 'nan', 'None', 'NaN', 'null']: return None
     try:
+        # Reemplazar comas decimales por puntos si existen
         if ',' in s:
             partes = s.split(',')
-            s_convertir = partes[0].replace('.', '') + '.' + partes[1] # <--- CORREGIDO: partes en vez de pandas
+            s_convertir = partes[0].replace('.', '') + '.' + partes[1]
         else:
-            s_convertir = s if s.count('.') == 1 else s.replace('.', '')
-        valor = float(s_convertir)
-        if valor > 5000.0:
-            s_digitos = re.sub(r'[^\d]', '', s_convertir)
-            if len(s_digitos) >= 3: valor = float(s_digitos[:3] + '.' + s_digitos[3:5])
+            s_convertir = s
+        
+        # Dejar solo dígitos, puntos o signos menos
+        s_limpio = re.sub(r'[^\d\.\-]', '', s_convertir)
+        valor = float(s_limpio)
         return valor
-    except: return None
+    except: 
+        return None
 
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
@@ -70,16 +72,16 @@ def cargar_datos_produccion():
     df.columns = df.columns.str.strip()
     columnas_fecha = [col for col in df.columns if 'fech' in col.lower()]
     if columnas_fecha: df = df.rename(columns={columnas_fecha[0]: 'Fecha'})
+    
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
+    
+    # Convertir rigurosamente las columnas numéricas
     for col in df.columns:
         if col != 'Fecha':
             df[col] = df[col].apply(limpiar_formato_latam)
             df[col] = pd.to_numeric(df[col], errors='coerce')
-    mapeo_pares = {'ANG01-R': 'ANG01-P', 'ANG02-R': 'ANG02-P', 'CCH01-R': 'CCH01-P', 'CCH02-R': 'CCH02-P'}
-    for col_real, col_prog in mapeo_pares.items():
-        if col_real in df.columns and col_prog in df.columns:
-            df.loc[df[col_real] > 300.0, col_real] = df[col_prog]
+            
     return df
 
 # PARSEO CONTROLADO DE FECHAS DE GOOGLE APPS SCRIPT
@@ -148,10 +150,11 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    df_calc = df_filtrado.copy()
-    df_calc[col_real] = df_calc[col_real].fillna(0.0)
-    df_calc[col_prog] = df_calc[col_prog].fillna(0.0)
-    df_filtrado['Desviacion_MW'] = df_calc[col_real] - df_calc[col_prog]
+    # Rellenar ceros para evitar saltos y asegurar restas matemáticas correctas
+    df_filtrado[col_real] = df_filtrado[col_real].fillna(0.0)
+    df_filtrado[col_prog] = df_filtrado[col_prog].fillna(0.0)
+    
+    df_filtrado['Desviacion_MW'] = df_filtrado[col_real] - df_filtrado[col_prog]
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
 
     # --- BOTÓN EXPORTACIÓN PDF EN BARRA LATERAL ---
@@ -165,10 +168,12 @@ try:
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_prog], name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5), connectgaps=True))
+    
     if mostrar_achurado:
         fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_real], name='Potencia Real', line=dict(color='#3B66FF', width=2.5), fill='tonexty', fillcolor='rgba(161, 134, 250, 0.25)', connectgaps=True))
     else:
         fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=df_filtrado[col_real], name='Potencia Real', line=dict(color='#3B66FF', width=2.5), connectgaps=True))
+        
     fig.update_layout(title="Curva de Desempeño Temporal (Ventana de Control Activa)", xaxis_title="Tiempo / Horas", yaxis_title="Potencia (MW)", template="plotly_white", hovermode="x unified", margin=dict(t=40, b=40))
     st.plotly_chart(fig, width="stretch")
 
