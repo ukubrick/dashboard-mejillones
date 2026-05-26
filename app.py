@@ -54,11 +54,12 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # LIMPIEZA DE TEXTO DECIMAL SEGURO ANTES DE TRANSFORMAR A NÚMERO
+    # TRATAMIENTO ULTRA-SEGURO DE CADENAS DECIMALES LATINOAMERICANAS
     for col in df.columns:
         if col != 'Fecha':
-            if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).str.replace(' ', '', regex=False).str.replace(',', '.', regex=False)
+            # Convertimos todo explícitamente a string para sanitizarlo sin importar cómo lo cargó el motor de C
+            df[col] = df[col].astype(str).str.replace(' ', '', regex=False).str.replace(',', '.', regex=False)
+            # Re-convertimos a numérico de forma estricta
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
     return df
@@ -132,7 +133,7 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # CERO MÉTODOS OBSOLETOS: Extracción y llenado directo compatible y seguro
+    # Extracción final limpia libre de dependencias obsoletas
     serie_real = df_filtrado[col_real].fillna(0.0)
     serie_prog = df_filtrado[col_prog].fillna(0.0)
     
