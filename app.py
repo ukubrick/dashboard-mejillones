@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import re
 import requests
 
 # 1. CONFIGURACIÓN DE LA PÁGINA EN MODO ANCHO
@@ -38,39 +37,14 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
-def limpiar_potencia_real(val):
-    if pd.isna(val): return 0.0
-    s = str(val).strip().replace(' ', '')
-    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return 0.0
-    try:
-        if ',' in s and s.count(',') == 1:
-            s = s.replace('.', '').replace(',', '.')
-        s_limpio = re.sub(r'[^\d\.\-]', '', s)
-        valor = float(s_limpio)
-        if valor > 1000.0:
-            valor = valor / 1000.0
-        return valor
-    except:
-        return 0.0
-
-def limpiar_potencia_programada(val):
-    if pd.isna(val): return 0.0
-    s = str(val).strip().replace(' ', '')
-    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return 0.0
-    try:
-        # Tratamiento directo para la programada (sin divisiones agresivas por defecto)
-        s_limpio = re.sub(r'[^\d\.\-]', '', s)
-        return float(s_limpio)
-    except:
-        return 0.0
-
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
     try:
-        df = pd.read_csv(URL_GOOGLE_SHEETS, on_bad_lines="skip", engine="python", dtype=str)
+        # Volvemos a la lectura nativa directa que no generaba conflictos de escala
+        df = pd.read_csv(URL_GOOGLE_SHEETS, on_bad_lines="skip", engine="python")
         st.sidebar.success("Conexión activa: Datos desde Google Sheets")
     except Exception as e:
-        df = pd.read_csv("Planilla_Consolidada_GoogleSheets.csv", on_bad_lines="skip", engine="python", dtype=str)
+        df = pd.read_csv("Planilla_Consolidada_GoogleSheets.csv", on_bad_lines="skip", engine="python")
         st.sidebar.warning("Modo offline: Cargando copia local de contingencia")
         
     df.columns = df.columns.str.strip()
@@ -81,15 +55,12 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
-    # Procesamiento inteligente según el sufijo de la columna
+    # Conversión numérica estándar global de Pandas sin alterar strings válidos
     for col in df.columns:
         if col != 'Fecha':
-            if col.upper().endswith('-R'):
-                df[col] = df[col].apply(limpiar_potencia_real)
-            elif col.upper().endswith('-P'):
-                df[col] = df[col].apply(limpiar_potencia_programada)
-            else:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(' ', '').str.replace(',', '.')
+            df[col] = pd.to_numeric(df[col], errors='coerce')
             
     return df
 
@@ -132,6 +103,7 @@ try:
     columnas = list(df_metrics.columns)
     unidades_detectadas = {}
     
+    # Mapeo directo y estricto idéntico al de las versiones que funcionaban
     mapeo_estricto = {
         "Angamos Unidad 1": ("ANG01-R", "ANG01-P"),
         "Angamos Unidad 2": ("ANG02-R", "ANG02-P"),
@@ -162,8 +134,9 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    serie_real = df_filtrado[col_real]
-    serie_prog = df_filtrado[col_prog]
+    # Rellenar nulos con interpolación o ceros de manera limpia sin romper vectores
+    serie_real = df_filtrado[col_real].fillna(method='ffill').fillna(0.0)
+    serie_prog = df_filtrado[col_prog].fillna(method='ffill').fillna(0.0)
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
