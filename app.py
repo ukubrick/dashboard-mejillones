@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import re
 import requests
 
 # 1. CONFIGURACIÓN DE LA PÁGINA EN MODO ANCHO
@@ -39,21 +38,23 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
-def limpiar_formato_latam(val):
+def conversion_numerica_segura(val):
     if pd.isna(val): return None
-    s = str(val).strip().replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
-    if s in ['', 'nan', 'None', 'NaN', 'null']: return None
+    s = str(val).strip().replace(' ', '')
+    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return None
     try:
+        # Si contiene coma, es formato LATAM (ej: 140,50)
         if ',' in s:
-            partes = s.split(',')
-            s_convertir = partes[0].replace('.', '') + '.' + partes[1]
-        else:
-            s_convertir = s
-        
-        s_limpio = re.sub(r'[^\d\.\-]', '', s_convertir)
-        return float(s_limpio)
-    except: 
-        return None
+            s = s.replace('.', '').replace(',', '.')
+        return float(s)
+    except:
+        # Fallback por si queda algún caracter extraño adherido
+        try:
+            import re
+            s_limpio = re.sub(r'[^\d\.\-]', '', s)
+            return float(s_limpio)
+        except:
+            return None
 
 @st.cache_data(ttl=10)
 def cargar_datos_produccion():
@@ -72,10 +73,10 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
+    # Aplicar la conversión segura a todas las columnas numéricas
     for col in df.columns:
         if col != 'Fecha':
-            df[col] = df[col].apply(limpiar_formato_latam)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].apply(conversion_numerica_segura)
             
     return df
 
@@ -118,7 +119,7 @@ try:
     columnas = list(df_metrics.columns)
     unidades_detectadas = {}
     
-    # Mapeo manual ultra-preciso basado en las columnas reales del documento
+    # Mapeo directo y absoluto
     mapeo_estricto = {
         "Angamos Unidad 1": ("ANG01-R", "ANG01-P"),
         "Angamos Unidad 2": ("ANG02-R", "ANG02-P"),
@@ -127,21 +128,10 @@ try:
     }
 
     for nombre_legible, (r_tag, p_tag) in mapeo_estricto.items():
-        col_r = [c for c in columnas if c.upper() == r_tag]
-        col_p = [c for c in columnas if c.upper() == p_tag]
+        col_r = [c for c in columnas if c.upper() == r_tag.upper()]
+        col_p = [c for c in columnas if c.upper() == p_tag.upper()]
         if col_r and col_p:
             unidades_detectadas[nombre_legible] = (col_r[0], col_p[0])
-
-    # Si por alguna razón falla el emparejamiento estricto, usamos el fallback dinámico anterior
-    if not unidades_detectadas:
-        def buscar_par_columnas(tag_unidad):
-            col_r = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'r' in c.lower()]
-            col_p = [c for c in columnas if tag_unidad.lower() in c.lower().replace("-", "").replace("_", "") and 'p' in c.lower()]
-            return (col_r[0], col_p[0]) if (col_r and col_p) else None
-
-        for nombre_legible, tag in [("Angamos Unidad 1", "ANG01"), ("Angamos Unidad 2", "ANG02"), ("Cochrane Unidad 1", "CCH01"), ("Cochrane Unidad 2", "CCH02")]:
-            par = buscar_par_columnas(tag)
-            if par: unidades_detectadas[nombre_legible] = par
 
     st.sidebar.header("Filtros de Operación")
     seleccion_unidad = st.sidebar.selectbox("Selecciona Unidad:", list(unidades_detectadas.keys()))
@@ -160,9 +150,9 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Operación matemática directa sobre copias limpias sin alterar el DataFrame original
-    serie_real = pd.to_numeric(df_filtrado[col_real]).fillna(0.0)
-    serie_prog = pd.to_numeric(df_filtrado[col_prog]).fillna(0.0)
+    # Procesar las series finales cuidando no sobreescribir con ceros registros válidos
+    serie_real = df_filtrado[col_real].fillna(0.0)
+    serie_prog = df_filtrado[col_prog].fillna(0.0)
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
@@ -177,7 +167,6 @@ try:
     mostrar_achurado = st.checkbox("Mostrar área de desviación (Bruta vs Programada)", value=False)
 
     fig = go.Figure()
-    # Graficar usando directamente las series procesadas para asegurar consistencia
     fig.add_trace(go.Scatter(x=df_filtrado['Fecha'], y=serie_prog, name='Potencia Programada', line=dict(color='#3CD6F1', width=2.5), connectgaps=True))
     
     if mostrar_achurado:
