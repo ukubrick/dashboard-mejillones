@@ -38,25 +38,29 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
-def conversion_numerica_segura(val):
+def limpiar_potencia_real(val):
     if pd.isna(val): return 0.0
     s = str(val).strip().replace(' ', '')
     if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return 0.0
     try:
-        # Detectar formato LATAM con coma decimal (ej: 240,5)
         if ',' in s and s.count(',') == 1:
             s = s.replace('.', '').replace(',', '.')
-        
-        # Eliminar cualquier residuo que no sea número, punto o menos
         s_limpio = re.sub(r'[^\d\.\-]', '', s)
         valor = float(s_limpio)
-        
-        # CORRECCIÓN DE ESCALA CRÍTICA:
-        # Si el número se disparó por culpa de puntos fantasmas (ej: 277900.0 en vez de 277.9)
         if valor > 1000.0:
             valor = valor / 1000.0
-            
         return valor
+    except:
+        return 0.0
+
+def limpiar_potencia_programada(val):
+    if pd.isna(val): return 0.0
+    s = str(val).strip().replace(' ', '')
+    if s in ['', 'nan', 'None', 'NaN', 'null', '-']: return 0.0
+    try:
+        # Tratamiento directo para la programada (sin divisiones agresivas por defecto)
+        s_limpio = re.sub(r'[^\d\.\-]', '', s)
+        return float(s_limpio)
     except:
         return 0.0
 
@@ -77,10 +81,15 @@ def cargar_datos_produccion():
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha'])
     
+    # Procesamiento inteligente según el sufijo de la columna
     for col in df.columns:
         if col != 'Fecha':
-            df[col] = df[col].apply(conversion_numerica_segura)
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            if col.upper().endswith('-R'):
+                df[col] = df[col].apply(limpiar_potencia_real)
+            elif col.upper().endswith('-P'):
+                df[col] = df[col].apply(limpiar_potencia_programada)
+            else:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             
     return df
 
@@ -153,14 +162,13 @@ try:
         inicio, fin = fecha_inicio_defecto, fecha_max_datos
         df_filtrado = df_metrics.copy()
 
-    # Extraer las series limpias directamente
     serie_real = df_filtrado[col_real]
     serie_prog = df_filtrado[col_prog]
     
     df_filtrado['Desviacion_MW'] = serie_real - serie_prog
     df_filtrado['Desviacion_Abs_MW'] = df_filtrado['Desviacion_MW'].abs()
 
-    # --- BOTÓN EXPORTACIÓN PDF EN BARRA LATERAL ---
+    # --- BOTÓN EXPORTACIÓN PDF ---
     st.sidebar.markdown("---")
     st.sidebar.header("Reportabilidad")
     if st.sidebar.button("🖨️ Generar Reporte / Imprimir PDF"):
@@ -206,7 +214,7 @@ try:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- SECCIÓN BITÁCORA CON FILTRO VINCULADO ---
+    # --- SECCIÓN BITÁCORA ---
     st.markdown("---")
     st.markdown("### Bitácora de Novedades Operacionales (Historial Unificado)")
     
@@ -262,9 +270,9 @@ try:
             st.dataframe(df_mostrar[['fecha', 'hora', 'autor', 'comentario']], column_config={"fecha": "Fecha", "hora": "Hora Exacta", "autor": "Jefe de Turno", "comentario": "Novedad / Comentario"}, width="stretch", hide_index=True)
             
             st.markdown("#### Administración de Registros")
-            options_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
+            opciones_admin = {row["id"]: f"[{row['fecha']} {row['hora']}] - {row['comentario'][:30]}..." for _, row in df_comentarios_filtrados.iterrows()}
             
-            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(options_admin.keys()), format_func=lambda x: options_admin[x])
+            id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
             registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
             
             mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
