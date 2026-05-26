@@ -38,8 +38,8 @@ st.markdown("Visualización e ingeniería de datos para el control de despacho y
 # --- ENLACES DE GOOGLE SHEETS ---
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLvFug7yx0-2rF1nwhWt8q4l8mpGtO7Xpi3BK6lEvLw-L19bDQZIFXc4Fu63WHvip6PqarXxC1VJR3/pub?output=csv"
 
-# !!! COLOCA AQUÍ TU URL LARGA DE APPS SCRIPT !!!
-URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2" # Reemplazar si es diferente
+# URL de Google Apps Script para la Bitácora Global
+URL_API_BITACORA = "https://script.google.com/macros/library/d/1l0zQncbODrFu_TewveQeSSte16mPdqqyiISj84wKfpbeAzICMAFF7Dvs/2"
 
 def limpiar_formato_latam(val):
     if pd.isna(val): return None
@@ -48,7 +48,7 @@ def limpiar_formato_latam(val):
     try:
         if ',' in s:
             partes = s.split(',')
-            s_convertir = partes[0].replace('.', '') + '.' + partes[1]
+            s_convertir = partes[0].replace('.', '') + '.' + pandas[1]
         else:
             s_convertir = s if s.count('.') == 1 else s.replace('.', '')
         valor = float(s_convertir)
@@ -99,7 +99,7 @@ def normalizar_hora_api(hora_raw):
     if "T" in str_h:
         try:
             componente_hora = str_h.split("T")[1].replace("Z", "")
-            return componente_hora Oscar[:5]
+            return componente_hora[:5]
         except: pass
     return str_h[:5]
 
@@ -204,7 +204,7 @@ try:
     
     df_comentarios = obtener_bitacora_global()
     
-    # Aplicar Filtros: 1. Unidad Seleccionada, 2. Rango de fecha seleccionado
+    # Aplicar Filtros Vinculados a la Vista Temporal de Operación
     if not df_comentarios.empty:
         df_comentarios['fecha_parsed'] = pd.to_datetime(df_comentarios['fecha'], format='%d/%m/%Y', errors='coerce')
         df_comentarios_filtrados = df_comentarios[
@@ -260,7 +260,7 @@ try:
             id_seleccionado = st.selectbox("Selecciona un evento para Gestionar o Modificar:", options=list(opciones_admin.keys()), format_func=lambda x: opciones_admin[x])
             registro_actual = df_comentarios_filtrados[df_comentarios_filtrados['id'] == id_seleccionado].iloc[0]
             
-            # Formulario de Modificación / Eliminación Dinámica
+            # Formulario dinámico para Edición y Modificación de eventos existentes
             mod_autor = st.text_input("Modificar Autor:", value=registro_actual['autor'])
             mod_comentario = st.text_area("Modificar Descripción:", value=registro_actual['comentario'])
             
